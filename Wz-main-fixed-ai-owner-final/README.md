@@ -30,11 +30,12 @@ Generate key dengan:
 npx web-push generate-vapid-keys
 ```
 
-### Wajib: WZ AI Analyst
-- `OPENAI_API_KEY`
+### WZ AI Analyst
+- `OPENAI_API_KEY` (opsional)
 - `OPENAI_MODEL` (default kode: `gpt-4o-mini`)
+- `WZ_USE_LOCAL_AI=true` (default; aktif bila `OPENAI_API_KEY` tidak diisi)
 
-`OPENAI_API_KEY` wajib diisi. Jika belum ada, endpoint WZ AI Analyst mengembalikan `503` dan deployment dianggap belum siap.
+AI lokal bawaan sudah tersedia di server. Bila `OPENAI_API_KEY` tidak diisi, WZ AI Analyst tetap bisa menjawab berdasarkan data WZ yang sedang dibaca. API eksternal OpenAI hanya dipakai jika Anda mengisi key tersebut.
 
 ### Deployment
 - `NODE_ENV=production` disarankan di Vercel agar pesan error internal tidak dikirim ke pengguna dan cookie session memakai `Secure`.

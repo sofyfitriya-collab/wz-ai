@@ -34,11 +34,34 @@ function safeServerError(error){
   return process.env.NODE_ENV === 'production' ? 'Server sedang tidak tersedia. Silakan coba lagi nanti.' : message;
 }
 function pushConfigured(){return !!(process.env.VAPID_PUBLIC_KEY&&process.env.VAPID_PRIVATE_KEY&&process.env.VAPID_SUBJECT)}
+function localAiEnabled(){return String(process.env.WZ_USE_LOCAL_AI || 'true').toLowerCase() !== 'false';}
 function missingRequiredConfig(){
   const missing=[];
   if(!pushConfigured())missing.push('VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT');
-  if(!String(process.env.OPENAI_API_KEY||'').trim())missing.push('OPENAI_API_KEY');
   return missing;
+}
+function localAiAnswer(question,data){
+  const q=String(question||'').toLowerCase();
+  const summary=data?.summary||{};
+  const totalOmzet=Number(summary.omzetPOS||0)+Number(summary.omzetShift||0);
+  const topKaryawan=(data?.topKaryawan||[]).slice(0,3).map(([name,value])=>`${name}: Rp${Number(value).toLocaleString('id-ID')}`).join('; ')||'tidak ada data';
+  const layanan=(data?.layananTerjual||[]).slice(0,3).map(([name,value])=>`${name}: ${value}`).join('; ')||'tidak ada data';
+  const produk=(data?.produkTerjual||[]).slice(0,3).map(([name,value])=>`${name}: ${value}`).join('; ')||'tidak ada data';
+  const cabang=(data?.omzetPerCabang||[]).slice(0,3).map(([name,value])=>`${name}: Rp${Number(value).toLocaleString('id-ID')}`).join('; ')||'tidak ada data';
+  const pengeluaran=Number(summary.pengeluaranTotal||0);
+  if(/omzet|penjualan|pendapatan|revenue|income/.test(q)){
+    return `Berdasarkan data WZ pada scope ${data?.scope||'ALL'}, total omzet saat ini sekitar Rp${Number(totalOmzet).toLocaleString('id-ID')}. Komposisi dari POS dan tutup shift menunjukkan penjualan paling kuat di cabang/pegawai berikut: ${cabang}.`;
+  }
+  if(/karyawan|pegawai|perform|produk|services|layanan/.test(q)){
+    return `Kinerja karyawan tertinggi berdasarkan data: ${topKaryawan}. Layanan paling sering terjual: ${layanan}. Produk paling laris: ${produk}.`;
+  }
+  if(/pengeluaran|biaya|expense/.test(q)){
+    return `Total pengeluaran yang tercatat sebesar Rp${Number(pengeluaran).toLocaleString('id-ID')}. Ini mencakup pengeluaran shift dan pengeluaran umum dari data WZ yang tersedia.`;
+  }
+  if(/cabang|branch/.test(q)){
+    return `Distribusi omzet per cabang: ${cabang}.`;
+  }
+  return `Berdasarkan data WZ yang tersedia pada scope ${data?.scope||'ALL'}, total transaksi tercatat ${summary.transactions||0}, laporan shift ${summary.shiftReports||0}, dan total omzet sekitar Rp${Number(totalOmzet).toLocaleString('id-ID')}. Karyawan terbaik: ${topKaryawan}.`;
 }
 async function sendShiftPushes(report,senderId){
   if(!pushConfigured())return;
@@ -221,7 +244,7 @@ async function handler(req,res){
     if(path==='ready'){
       const missing=missingRequiredConfig();
       if(missing.length)return send(res,503,{ok:false,service:'WZ MANAGE PRO API',database:true,missingRequiredConfig:missing});
-      return send(res,200,{ok:true,service:'WZ MANAGE PRO API',database:true,push:true,ai:true});
+      return send(res,200,{ok:true,service:'WZ MANAGE PRO API',database:true,push:true,ai:localAiEnabled()||!!String(process.env.OPENAI_API_KEY||'').trim()});
     }
     if(path==='auth/login' && req.method==='POST'){
       const b=await body(req),username=String(b.username||'').trim(),password=String(b.password||'');
@@ -261,16 +284,20 @@ async function handler(req,res){
       if(u.role!=='owner')return send(res,403,{ok:false,error:'WZ AI Analyst hanya tersedia untuk Owner.'});
       const b=await body(req),question=String(b.question||'').trim(),branchId=String(b.branchId||'ALL');
       if(!question)return send(res,400,{ok:false,error:'Pertanyaan wajib diisi.'});
-      const apiKey=String(process.env.OPENAI_API_KEY||'').trim();
-      if(!apiKey)return send(res,503,{ok:false,error:'AI Engine belum dikonfigurasi. Isi OPENAI_API_KEY di environment server.'});
       const data=await ownerAiData(u,branchId),compact=aiCompactData(data);
+      const apiKey=String(process.env.OPENAI_API_KEY||'').trim();
+      if(!apiKey && !localAiEnabled())return send(res,503,{ok:false,error:'AI Engine belum dikonfigurasi. Isi OPENAI_API_KEY atau aktifkan AI lokal.'});
+      if(!apiKey){
+        const answer=localAiAnswer(question,compact);
+        return send(res,200,{ok:true,answer,aiConfigured:true,scope:branchId,source:'WZ LOCAL AI'});
+      }
       const system=`Kamu adalah WZ AI Analyst untuk Owner WZ MANAGE PRO. Jawab hanya berdasarkan DATA WZ yang diberikan. Jangan mengarang angka, transaksi, karyawan, cabang, layanan, produk, atau penyebab. Jika data tidak cukup, katakan data tidak cukup. Semua nominal dalam Rupiah. Bedakan POS dan TUTUP SHIFT sebagai sumber data, jangan menyatukan transaksi hanya karena namanya mirip. Cabang yang dipilih adalah scope analisis. Jika diminta perhitungan, hitung dari data. Jawab bahasa Indonesia, ringkas tetapi jelas, dan sebutkan periode/cabang bila diketahui.`;
       const payload={model:process.env.OPENAI_MODEL||'gpt-4o-mini',input:[{role:'system',content:[{type:'input_text',text:system}]},{role:'user',content:[{type:'input_text',text:`PERTANYAAN OWNER:\n${question}\n\nDATA WZ (JSON):\n${JSON.stringify(compact)}` }]}],temperature:0.1};
       const r=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'Authorization':`Bearer ${apiKey}`,'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const out=await r.json().catch(()=>({}));
       if(!r.ok)return send(res,502,{ok:false,error:'Penyedia AI gagal memproses pertanyaan.',detail:process.env.NODE_ENV==='production'?undefined:(out.error?.message||'')});
       const answer=out.output_text||out.output?.flatMap(x=>x.content||[]).map(x=>x.text||'').filter(Boolean).join('\n')||'AI tidak menghasilkan jawaban.';
-      return send(res,200,{ok:true,answer,aiConfigured:true,scope:branchId,source:'WZ DATA'});
+      return send(res,200,{ok:true,answer,aiConfigured:true,scope:branchId,source:'OPENAI'});
     }
     if(path==='business' && req.method==='GET'){
       const u=await authUser(req);if(!u)return send(res,401,{ok:false,error:'Belum login.'});
