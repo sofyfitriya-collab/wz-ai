@@ -1278,7 +1278,7 @@ async function askWzAI(){
  try{
   const branch=document.getElementById('wzAiBranch')?.value||'ALL';
   const r=await window.WZOnlineEmployee.api('ai-analyst',{method:'POST',body:JSON.stringify({question,branchId:branch})});
-  box.innerHTML=`<div style="white-space:pre-wrap;line-height:1.7">${ownerChartEsc(r.answer||'Tidak ada jawaban.')}</div><div class="subtle" style="margin-top:10px">Sumber: ${ownerChartEsc(r.source||'WZ DATA')} · Scope: ${ownerChartEsc(branch==='ALL'?'Semua Cabang':branch)}${r.aiConfigured?'':' · AI provider belum dikonfigurasi, mode jawaban data dasar digunakan.'}</div>`;
+  box.innerHTML=`<div style="white-space:pre-wrap;line-height:1.7">${ownerChartEsc(r.answer||'Tidak ada jawaban.')}</div><div class="subtle" style="margin-top:10px">Sumber: ${ownerChartEsc(r.source||'WZ DATA')} · Scope: ${ownerChartEsc(branch==='ALL'?'Semua Cabang':branch)}</div>`;
  }catch(e){box.innerHTML='<div class="subtle">Gagal memproses: '+ownerChartEsc(e.message||String(e))+'</div>'}
  finally{btn.disabled=false;btn.textContent='Tanya AI'}
 }

@@ -11,16 +11,39 @@ WZ MANAGE PRO menggunakan server/Neon PostgreSQL sebagai sumber data bisnis. Bro
 - `save()` hanya memperbarui state di memori dan menjadwalkan penyimpanan server; tidak ada browser storage.
 - Tidak ada fallback offline untuk transaksi/laporan. Bila server gagal, data tidak dianggap tersimpan.
 
-## Database
-Vercel memakai environment variable PostgreSQL Neon. API menerima `WZDATABASE` (prioritas utama), `DATABASE_URL`, `POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`, atau `NEON_DATABASE_URL`.
+## Environment variable
+Salin `.env.example` sebagai acuan. Jangan commit file `.env` atau nilai rahasia ke Git.
 
-## Web Push
-Environment:
+### Wajib
+- `WZDATABASE` — connection string PostgreSQL/Neon. API juga menerima `DATABASE_URL`, `POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`, atau `NEON_DATABASE_URL`.
+
+Tanpa connection string, API tidak dapat membuat tabel, login, atau menyimpan data.
+
+### Wajib: Web Push
 - `VAPID_PUBLIC_KEY`
 - `VAPID_PRIVATE_KEY`
 - `VAPID_SUBJECT`
 
-Buat key dengan `npx web-push generate-vapid-keys`.
+Ketiga variabel harus diisi bersama-sama. Deployment dianggap belum siap dan `/api/ready` mengembalikan `503` jika salah satu belum ada.
+Generate key dengan:
+```bash
+npx web-push generate-vapid-keys
+```
+
+### Wajib: WZ AI Analyst
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL` (default kode: `gpt-4o-mini`)
+
+`OPENAI_API_KEY` wajib diisi. Jika belum ada, endpoint WZ AI Analyst mengembalikan `503` dan deployment dianggap belum siap.
+
+### Deployment
+- `NODE_ENV=production` disarankan di Vercel agar pesan error internal tidak dikirim ke pengguna dan cookie session memakai `Secure`.
+
+## Web Push
+Environment yang diperlukan:
+- `VAPID_PUBLIC_KEY`
+- `VAPID_PRIVATE_KEY`
+- `VAPID_SUBJECT`
 
 ## Akun seed
 - owner / owner123

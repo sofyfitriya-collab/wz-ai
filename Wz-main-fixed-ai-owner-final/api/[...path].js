@@ -34,6 +34,12 @@ function safeServerError(error){
   return process.env.NODE_ENV === 'production' ? 'Server sedang tidak tersedia. Silakan coba lagi nanti.' : message;
 }
 function pushConfigured(){return !!(process.env.VAPID_PUBLIC_KEY&&process.env.VAPID_PRIVATE_KEY&&process.env.VAPID_SUBJECT)}
+function missingRequiredConfig(){
+  const missing=[];
+  if(!pushConfigured())missing.push('VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT');
+  if(!String(process.env.OPENAI_API_KEY||'').trim())missing.push('OPENAI_API_KEY');
+  return missing;
+}
 async function sendShiftPushes(report,senderId){
   if(!pushConfigured())return;
   webpush.setVapidDetails(process.env.VAPID_SUBJECT,process.env.VAPID_PUBLIC_KEY,process.env.VAPID_PRIVATE_KEY);
@@ -212,7 +218,11 @@ async function handler(req,res){
   try{
     await ensureSchema();
     const path=req.url.split('?')[0].replace(/^\/api\/?/,'').replace(/\/$/,'');
-    if(path==='ready')return send(res,200,{ok:true,service:'WZ MANAGE PRO API',database:true});
+    if(path==='ready'){
+      const missing=missingRequiredConfig();
+      if(missing.length)return send(res,503,{ok:false,service:'WZ MANAGE PRO API',database:true,missingRequiredConfig:missing});
+      return send(res,200,{ok:true,service:'WZ MANAGE PRO API',database:true,push:true,ai:true});
+    }
     if(path==='auth/login' && req.method==='POST'){
       const b=await body(req),username=String(b.username||'').trim(),password=String(b.password||'');
       if(!username||!password)return send(res,400,{ok:false,error:'Username dan password wajib diisi.'});
@@ -251,18 +261,10 @@ async function handler(req,res){
       if(u.role!=='owner')return send(res,403,{ok:false,error:'WZ AI Analyst hanya tersedia untuk Owner.'});
       const b=await body(req),question=String(b.question||'').trim(),branchId=String(b.branchId||'ALL');
       if(!question)return send(res,400,{ok:false,error:'Pertanyaan wajib diisi.'});
+      const apiKey=String(process.env.OPENAI_API_KEY||'').trim();
+      if(!apiKey)return send(res,503,{ok:false,error:'AI Engine belum dikonfigurasi. Isi OPENAI_API_KEY di environment server.'});
       const data=await ownerAiData(u,branchId),compact=aiCompactData(data);
       const system=`Kamu adalah WZ AI Analyst untuk Owner WZ MANAGE PRO. Jawab hanya berdasarkan DATA WZ yang diberikan. Jangan mengarang angka, transaksi, karyawan, cabang, layanan, produk, atau penyebab. Jika data tidak cukup, katakan data tidak cukup. Semua nominal dalam Rupiah. Bedakan POS dan TUTUP SHIFT sebagai sumber data, jangan menyatukan transaksi hanya karena namanya mirip. Cabang yang dipilih adalah scope analisis. Jika diminta perhitungan, hitung dari data. Jawab bahasa Indonesia, ringkas tetapi jelas, dan sebutkan periode/cabang bila diketahui.`;
-      const apiKey=String(process.env.OPENAI_API_KEY||'').trim();
-      if(!apiKey){
-        const s=compact.summary;
-        const q=question.toLowerCase();
-        let answer='Mesin AI belum terhubung ke penyedia AI. Namun data Owner berhasil dimuat.';
-        if(q.includes('omzet')) answer=`Scope ${branchId==='ALL'?'semua cabang':branchId}: omzet POS ${s.omzetPOS.toLocaleString('id-ID')}, omzet Tutup Shift ${s.omzetShift.toLocaleString('id-ID')}.`;
-        else if(q.includes('pengeluaran')) answer=`Pengeluaran shift Rp${s.pengeluaranShift.toLocaleString('id-ID')}; pengeluaran umum Rp${s.pengeluaranUmum.toLocaleString('id-ID')}; total Rp${s.pengeluaranTotal.toLocaleString('id-ID')}.`;
-        else if(q.includes('pelanggan')) answer=`Total pelanggan pada laporan Tutup Shift dalam scope ini: ${s.customers}.`;
-        return send(res,200,{ok:true,answer,aiConfigured:false,scope:branchId,source:'WZ DATA'});
-      }
       const payload={model:process.env.OPENAI_MODEL||'gpt-4o-mini',input:[{role:'system',content:[{type:'input_text',text:system}]},{role:'user',content:[{type:'input_text',text:`PERTANYAAN OWNER:\n${question}\n\nDATA WZ (JSON):\n${JSON.stringify(compact)}` }]}],temperature:0.1};
       const r=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'Authorization':`Bearer ${apiKey}`,'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const out=await r.json().catch(()=>({}));
